@@ -3,9 +3,11 @@ import './HomeScreen.css';
 
 interface HomeScreenProps {
   onNavigate?: (screen: string) => void;
+  onInstall?: () => void;
+  showInstallButton?: boolean;
 }
 
-const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
+const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInstallButton }) => {
   return (
     <div className="home-screen">
       {/* Desktop Layout */}
@@ -44,6 +46,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
                   <span className="btn-icon">📖</span>
                   Aprende mas
                 </button>
+                {showInstallButton && (
+                  <button className="btn-hero-install" onClick={onInstall}>
+                    <span className="btn-icon">📱</span>
+                    Instalar App
+                  </button>
+                )}
               </div>
             </div>
             <div className="hero-visual">
@@ -139,6 +147,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             <button className="mobile-btn-secondary" onClick={() => onNavigate?.('about')}>
               Aprende mas
             </button>
+            {showInstallButton && (
+              <button className="mobile-btn-install" onClick={onInstall}>
+                📱 Instalar App
+              </button>
+            )}
           </div>
         </main>
       </div>
