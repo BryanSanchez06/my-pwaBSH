@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import HomeScreen from './components/HomeScreen';
 import SplashScreen from './components/SplashScreen';
 import { registerServiceWorker, isPWA, isOnline, setupOnlineStatusListener } from './utils/serviceWorker';
@@ -7,7 +7,7 @@ import './App.css';
 function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [currentScreen, setCurrentScreen] = useState('home');
-  const [isAppInstalled, setIsAppInstalled] = useState(false);
+  const [, setIsAppInstalled] = useState(false);
   const [isOnlineStatus, setIsOnlineStatus] = useState(true);
 
   useEffect(() => {

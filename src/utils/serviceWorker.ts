@@ -48,7 +48,7 @@ export const unregisterServiceWorker = async (): Promise<void> => {
 // Check if the app is running as a PWA
 export const isPWA = (): boolean => {
   return window.matchMedia('(display-mode: standalone)').matches ||
-         (window.navigator as any).standalone === true ||
+         (window.navigator as Navigator & { standalone?: boolean }).standalone === true ||
          document.referrer.includes('android-app://');
 };
 
@@ -94,7 +94,7 @@ const showUpdateNotification = (): void => {
 export const registerBackgroundSync = async (tag: string): Promise<void> => {
   if ('serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype) {
     const registration = await navigator.serviceWorker.ready;
-    await registration.sync.register(tag);
+    await (registration as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register(tag);
     console.log('Background sync registered:', tag);
   }
 };
