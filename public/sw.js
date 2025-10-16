@@ -257,6 +257,27 @@ async function removeTask(id) {
     tx.onerror = () => reject(tx.error);
   });
 }
+// Nueva función para actualizar campo 'pendiente' en una tarea en IndexedDB
+async function marcarSincronizada(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('tasks', 'readwrite');
+    const store = tx.objectStore('tasks');
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const tarea = req.result;
+      if (tarea) {
+        tarea.pendiente = false;
+        const putReq = store.put(tarea);
+        putReq.onsuccess = resolve;
+        putReq.onerror = () => reject(putReq.error);
+      } else {
+        resolve();
+      }
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
 // --- END IndexedDB helpers ----
 
 async function doBackgroundSync() {
@@ -272,18 +293,40 @@ async function doBackgroundSync() {
       await new Promise(res => setTimeout(res, 500));
       console.log('SW Sync: Enviando tarea (simulado):', t);
       // Si fuera real: await fetch('/api/tareas', {method: 'POST', body: JSON.stringify(t), headers: {'Content-Type': 'application/json'}})
-      await removeTask(t.id);
-      console.log('SW Sync: Tarea eliminada tras sincronización:', t.id);
+      await marcarSincronizada(t.id);
+      console.log('SW Sync: Tarea marcada como sincronizada:', t.id);
     }
-    // (Opcional) Notificación después de sincronizar
-    self.registration.showNotification('GENESIS', {
-      body: '👍 Tareas offline sincronizadas',
-      icon: '/icons/icon-192x192.svg'
-    });
+    // Enviar mensaje a los clientes para que refresquen UI
+    try {
+      const clientsList = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+      for (const client of clientsList) {
+        client.postMessage({ type: 'sync-complete' });
+      }
+
+      // Mostrar notificación solo si no hay clientes visibles (evita duplicados cuando la app está en primer plano)
+      const anyVisible = clientsList.some(c => c.visibilityState === 'visible');
+      if (!anyVisible) {
+        self.registration.showNotification('GENESIS', {
+          body: '👍 Tareas offline sincronizadas',
+          icon: '/icons/icon-192x192.svg'
+        });
+      } else {
+        console.log('SW Sync: Clientes visibles - omitiendo notificación para evitar duplicados');
+      }
+    } catch (err) {
+      console.error('SW Sync: Error enviando mensaje a clients', err);
+    }
   } catch (e) {
     console.error('SW Sync: Error en la sincronización offline', e);
   }
 }
+
+// Escuchar evento de Background Sync
+self.addEventListener('sync', (event) => {
+  console.log('Service Worker: sync event', event.tag);
+  // Puedes filtrar por tag si registras con un tag específico
+  event.waitUntil(doBackgroundSync());
+});
 
 // Push notifications
 self.addEventListener('push', (event) => {

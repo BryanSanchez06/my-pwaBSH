@@ -1,11 +1,11 @@
 import React from 'react';
 import './HomeScreen.css';
 import { useEffect, useState } from 'react';
-import { addTask, getAllTasks } from '../utils/indexedDB';
+import { addTask, getAllTasks, updateTask } from '../utils/indexedDB';
 import type { Task } from '../utils/indexedDB';
-import { registerBackgroundSync } from '../utils/serviceWorker';
-import { db } from '../firebase';
+import { registerBackgroundSync, requestNotificationPermission } from '../utils/serviceWorker';
 import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface HomeScreenProps {
   onNavigate?: (screen: string) => void;
@@ -14,19 +14,51 @@ interface HomeScreenProps {
 }
 
 // Función para guardar la tarea en Firebase o IndexedDB según el estado de la red
-async function guardarUniversal(task: Omit<Task, 'id'>) {
+async function guardarUniversal(task: Omit<Task, 'id'|'pendiente'>) {
   if (navigator.onLine) {
     try {
       await addDoc(collection(db, 'tareas'), task);
-      // Aquí podrías lanzar una notificación de éxito si quieres
+      notificar('Tarea agregada', '¡La tarea fue registrada exitosamente!');
+      // También guardarla en local marcado como no pendiente
+      await addTask({ ...task, pendiente: false });
       return;
-    } catch (e) {
-      // Si falla el guardado remoto, mejor guardar offline
-      await addTask(task);
+    } catch {
+      // Si falla el guardado remoto, guardar offline pendiente
+      await addTask({ ...task, pendiente: true });
     }
   } else {
-    await addTask(task);
+    await addTask({ ...task, pendiente: true });
   }
+}
+
+// Nueva función: notificar
+function notificar(titulo: string, body: string) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(titulo, { body, icon: '/icons/icon-192x192.svg' });
+  }
+}
+
+// Sincronizar tareas pendientes
+async function sincronizarPendientes(setTasks: (tasks: Task[]) => void) {
+  const all = await getAllTasks();
+  const pendientes = all.filter(t => t.pendiente);
+  if (pendientes.length === 0) return;
+  for (const tarea of pendientes) {
+    try {
+      await addDoc(collection(db, 'tareas'), {
+        titulo: tarea.titulo,
+        descripcion: tarea.descripcion,
+        fecha: tarea.fecha
+      });
+      // Marcar como sincronizada en IndexedDB usando update
+      await updateTask({ ...tarea, pendiente: false });
+    } catch {
+      // Si falla, sigue pendiente
+    }
+  }
+  const actualizadas = await getAllTasks();
+  setTasks(actualizadas);
+  notificar('Tareas sincronizadas', 'Las tareas pendientes se han sincronizado.');
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInstallButton }) => {
@@ -37,7 +69,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInst
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
 
-  // Cargar tareas al montar
+
+  // Cargar tareas al montar y escuchar evento online
   useEffect(() => {
     async function cargar() {
       setLoading(true);
@@ -46,7 +79,34 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInst
       setLoading(false);
     }
     cargar();
+
+    // Solicitar permiso de notificaciones
+    requestNotificationPermission().then(() => {});
+
+    // Escuchar evento online para sincronizar
+    const syncHandler = () => sincronizarPendientes(setTasks);
+    window.addEventListener('online', syncHandler);
+    return () => window.removeEventListener('online', syncHandler);
   }, [guardando]);
+
+  // Listener de mensajes del Service Worker en un efecto separado para evitar registros múltiples
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handler = async (ev: MessageEvent) => {
+      try {
+        const data = ev.data;
+        if (data && data.type === 'sync-complete') {
+          setTasks(await getAllTasks());
+          notificar('Sincronización completa', 'Las tareas pendientes fueron sincronizadas.');
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []);
 
   // Agregar nueva tarea
   const handleSubmit = async (e: React.FormEvent) => {
@@ -165,8 +225,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInst
                 (tasks.length === 0 ? <span>No hay tareas guardadas.</span> :
                   <ul style={{padding:0,listStyle:'none'}}>
                     {tasks.map(t => (
-                      <li key={t.id} style={{border:'1px solid #eee',marginBottom:8,padding:8,borderRadius:6}}>
-                        <b>{t.titulo}</b><br />
+                      <li key={t.id} style={{border:'1px solid #eee',marginBottom:8,padding:8,borderRadius:6,background: t.pendiente ? '#FF0000' : '#000000'}}>
+                        <b>{t.titulo}</b> {t.pendiente && <span style={{color:'#ffffff',marginLeft:8}} title="Sincronizará cuando haya internet">(Pendiente ⏳)</span>}
+                        <br />
                         <small>{t.descripcion}</small><br />
                         <small>{new Date(t.fecha).toLocaleString()}</small>
                       </li>
