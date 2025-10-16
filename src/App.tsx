@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import HomeScreen from './components/HomeScreen';
 import SplashScreen from './components/SplashScreen';
 import { registerServiceWorker, isPWA, isOnline, setupOnlineStatusListener, requestNotificationPermission } from './utils/serviceWorker';
-import { getAllTasks, removeTask } from './utils/indexedDB';
+import { getAllTasks, updateTask } from './utils/indexedDB';
 import { db } from './firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import './App.css';
@@ -67,7 +67,10 @@ function App() {
       for (const tarea of allTasks) {
         try {
           await addDoc(collection(db, 'tareas'), tarea);
-          await removeTask(tarea.id!);
+          // En lugar de eliminar la tarea local, la marcamos como sincronizada
+          if (tarea.id) {
+            await updateTask({ ...tarea, pendiente: false });
+          }
         } catch (e) {
           console.log('Error subiendo tarea a Firebase', e);
         }

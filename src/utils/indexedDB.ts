@@ -10,6 +10,7 @@ export interface Task {
   titulo: string;
   descripcion: string;
   fecha: string;
+  pendiente?: boolean;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -51,6 +52,16 @@ export async function removeTask(id: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function updateTask(task: Task): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(task);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
