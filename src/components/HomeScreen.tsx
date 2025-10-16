@@ -1,5 +1,11 @@
 import React from 'react';
 import './HomeScreen.css';
+import { useEffect, useState } from 'react';
+import { addTask, getAllTasks } from '../utils/indexedDB';
+import type { Task } from '../utils/indexedDB';
+import { registerBackgroundSync } from '../utils/serviceWorker';
+import { db } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
 
 interface HomeScreenProps {
   onNavigate?: (screen: string) => void;
@@ -7,7 +13,58 @@ interface HomeScreenProps {
   showInstallButton?: boolean;
 }
 
+// Función para guardar la tarea en Firebase o IndexedDB según el estado de la red
+async function guardarUniversal(task: Omit<Task, 'id'>) {
+  if (navigator.onLine) {
+    try {
+      await addDoc(collection(db, 'tareas'), task);
+      // Aquí podrías lanzar una notificación de éxito si quieres
+      return;
+    } catch (e) {
+      // Si falla el guardado remoto, mejor guardar offline
+      await addTask(task);
+    }
+  } else {
+    await addTask(task);
+  }
+}
+
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInstallButton }) => {
+  // Estado local para formulario y listado
+  const [titulo, setTitulo] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+
+  // Cargar tareas al montar
+  useEffect(() => {
+    async function cargar() {
+      setLoading(true);
+      const all = await getAllTasks();
+      setTasks(all);
+      setLoading(false);
+    }
+    cargar();
+  }, [guardando]);
+
+  // Agregar nueva tarea
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGuardando(true);
+    const nueva = { titulo, descripcion, fecha: new Date().toISOString() };
+    await guardarUniversal(nueva);
+    setTitulo('');
+    setDescripcion('');
+    setGuardando(false);
+    if (!navigator.onLine) {
+      registerBackgroundSync('background-sync');
+    }
+    setLoading(true);
+    setTasks(await getAllTasks());
+    setLoading(false);
+  };
+
   return (
     <div className="home-screen">
       {/* Desktop Layout */}
@@ -93,6 +150,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onInstall, showInst
                 <h3>Listo sin conexión</h3>
                 <p>Funciona sin conexión a Internet</p>
               </div>
+            </div>
+          </section>
+
+          <section className="tasks-section" style={{margin:"2rem 0"}}>
+            <h2>📝 Lista de Tareas Offline</h2>
+            <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:8,maxWidth:320}}>
+              <input required placeholder="Título" value={titulo} onChange={e=>setTitulo(e.target.value)} />
+              <textarea required placeholder="Descripción" value={descripcion} onChange={e=>setDescripcion(e.target.value)} rows={2} />
+              <button type="submit" disabled={guardando}>{guardando?"Guardando...":"Guardar tarea"}</button>
+            </form>
+            <div style={{marginTop:16}}>
+              {loading ? <span>Cargando...</span> :
+                (tasks.length === 0 ? <span>No hay tareas guardadas.</span> :
+                  <ul style={{padding:0,listStyle:'none'}}>
+                    {tasks.map(t => (
+                      <li key={t.id} style={{border:'1px solid #eee',marginBottom:8,padding:8,borderRadius:6}}>
+                        <b>{t.titulo}</b><br />
+                        <small>{t.descripcion}</small><br />
+                        <small>{new Date(t.fecha).toLocaleString()}</small>
+                      </li>
+                    ))}
+                  </ul>
+                )}
             </div>
           </section>
         </main>

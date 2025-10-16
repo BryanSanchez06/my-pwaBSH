@@ -83,22 +83,23 @@ async function handleRequest(request) {
   const url = new URL(request.url);
   
   try {
-    // Strategy 1: Cache First for static assets
-    if (isStaticAsset(request)) {
+    // Cache First para assets del App Shell
+    if (isAppShellAsset(request)) {
       return await cacheFirstStrategy(request);
     }
-    
-    // Strategy 2: Network First for API calls
+    // Stale While Revalidate para imágenes
+    if (isImageRequest(request)) {
+      return await staleWhileRevalidateStrategy(request);
+    }
+    // Network First para APIs
     if (isApiRequest(request)) {
       return await networkFirstStrategy(request);
     }
-    
-    // Strategy 3: Stale While Revalidate for HTML pages
+    // Stale While Revalidate para HTML
     if (isHtmlRequest(request)) {
       return await staleWhileRevalidateStrategy(request);
     }
-    
-    // Default: Network First
+    // Default
     return await networkFirstStrategy(request);
     
   } catch (error) {
@@ -194,61 +195,94 @@ function isHtmlRequest(request) {
 async function getOfflinePage() {
   const cache = await caches.open(STATIC_CACHE_NAME);
   const offlineResponse = await cache.match('/');
-  
   if (offlineResponse) {
     return offlineResponse;
   }
-  
   return new Response(`
     <!DOCTYPE html>
-    <html>
+    <html lang="es">
     <head>
-      <title>GENESIS</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>GENESIS - Offline</title>
       <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 100vh;
-          margin: 0;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          text-align: center;
-        }
-        .offline-content {
-          padding: 2rem;
-        }
-        h1 { font-size: 2rem; margin-bottom: 1rem; }
-        p { font-size: 1.1rem; opacity: 0.9; }
+        body { font-family: system-ui,sans-serif; background: linear-gradient(135deg,#667eea,#4ecdc4); color:white; display:flex;align-items:center;justify-content:center; height:100vh; margin:0; }
+        .offline-content { text-align:center; background:rgba(0,0,0,0.3); padding:2rem 2.5rem; border-radius:1.5rem; box-shadow:0 6px 24px #0005; }
+        img { width:72px; margin-bottom:1rem; }
+        button { background:#fff; color:#226; border:none; border-radius:99px; padding:.7em 2em; font-size:1.1rem; margin-top:1.6rem; cursor:pointer; }
+        h1 { font-size:2rem; margin-bottom:.8em; letter-spacing:1px; }
       </style>
     </head>
     <body>
       <div class="offline-content">
-        <h1>You're Offline</h1>
-        <p>This app works offline, but some features may be limited.</p>
-        <p>Check your internet connection and try again.</p>
+        <img src="/icons/icon-192x192.svg" alt="Offline"/>
+        <h1>¡Estás sin conexión!</h1>
+        <p>La app funciona offline, pero algunas funciones requieren internet.<br>Vuelve a conectar y pulsa recargar para sincronizar.</p>
+        <button onclick="location.reload()">Recargar</button>
       </div>
     </body>
     </html>
-  `, {
-    headers: { 'Content-Type': 'text/html' }
-  });
+  `, { headers: { 'Content-Type': 'text/html' } });
 }
 
-// Background sync for offline actions
-self.addEventListener('sync', (event) => {
-  console.log('Service Worker: Background sync', event.tag);
-  
-  if (event.tag === 'background-sync') {
-    event.waitUntil(doBackgroundSync());
-  }
-});
+// --- IndexedDB helpers dentro del SW para tareas offline ----
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('offline-tasks-db', 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('tasks')) {
+        db.createObjectStore('tasks', { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function getAllTasks() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('tasks', 'readonly');
+    const req = tx.objectStore('tasks').getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function removeTask(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('tasks', 'readwrite');
+    tx.objectStore('tasks').delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+// --- END IndexedDB helpers ----
 
 async function doBackgroundSync() {
-  // Implement background sync logic here
   console.log('Service Worker: Performing background sync');
+  try {
+    const tasks = await getAllTasks();
+    if (!tasks.length) {
+      console.log('SW Sync: No hay tareas offline para sincronizar.');
+      return;
+    }
+    for (const t of tasks) {
+      // Simulación: "enviar" al backend (puedes reemplazar por fetch real)
+      await new Promise(res => setTimeout(res, 500));
+      console.log('SW Sync: Enviando tarea (simulado):', t);
+      // Si fuera real: await fetch('/api/tareas', {method: 'POST', body: JSON.stringify(t), headers: {'Content-Type': 'application/json'}})
+      await removeTask(t.id);
+      console.log('SW Sync: Tarea eliminada tras sincronización:', t.id);
+    }
+    // (Opcional) Notificación después de sincronizar
+    self.registration.showNotification('GENESIS', {
+      body: '👍 Tareas offline sincronizadas',
+      icon: '/icons/icon-192x192.svg'
+    });
+  } catch (e) {
+    console.error('SW Sync: Error en la sincronización offline', e);
+  }
 }
 
 // Push notifications
@@ -295,4 +329,14 @@ self.addEventListener('notificationclick', (event) => {
     );
   }
 });
+
+// Nuevos helpers para distinguir imágenes y App Shell assets
+function isAppShellAsset(request) {
+  const url = new URL(request.url);
+  return url.pathname.match(/\.(js|css)$/);
+}
+function isImageRequest(request) {
+  const url = new URL(request.url);
+  return url.pathname.match(/\.(png|jpg|jpeg|gif|webp|svg|ico)$/);
+}
 
